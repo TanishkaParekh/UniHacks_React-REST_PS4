@@ -1,10 +1,15 @@
-from django.db import models
 
+
+# Create your models here.
+from django.db import models
 from django.utils import timezone
 
 
 
 
+# =====================================================
+# 1️⃣ USER MODEL (Normal User)
+# =====================================================
 
 
 class UserMe(models.Model):
@@ -12,12 +17,10 @@ class UserMe(models.Model):
 
     name = models.CharField(max_length=100)
     email = models.EmailField(unique=True)
-    password = models.CharField(max_length=200) 
+    password = models.CharField(max_length=200)  # store hashed
     reward_points = models.IntegerField(default=0)
 
 
-    
-    swaps_used = models.IntegerField(default=0)
 
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -29,6 +32,9 @@ class UserMe(models.Model):
 
 
 
+# =====================================================
+# 2️⃣ INSTITUTION (Admin Model)
+# =====================================================
 
 
 class Institution(models.Model):
@@ -37,7 +43,7 @@ class Institution(models.Model):
     name = models.CharField(max_length=200)
     email = models.EmailField(unique=True)
     phone = models.CharField(max_length=15)
-    password = models.CharField(max_length=200)  
+    password = models.CharField(max_length=200)  # store hashed
 
 
     address = models.TextField(null=True, blank=True)
@@ -51,6 +57,10 @@ class Institution(models.Model):
 
 
 
+
+# =====================================================
+# 3️⃣ QUEUE
+# =====================================================
 
 
 class Queue(models.Model):
@@ -89,9 +99,12 @@ class Queue(models.Model):
 
 
 
+# =====================================================
+# 4️⃣ TOKEN (Updated with Per-Queue Swap Tracking)
+# =====================================================
+
+
 class Token(models.Model):
-
-
     STATUS_CHOICES = (
         ('WAITING', 'Waiting'),
         ('COMPLETED', 'Completed'),
@@ -99,22 +112,16 @@ class Token(models.Model):
     )
 
 
-    user = models.ForeignKey(
-        UserMe,
-        on_delete=models.CASCADE,
-        related_name="tokens"
-    )
-
-
-    queue = models.ForeignKey(
-        Queue,
-        on_delete=models.CASCADE,
-        related_name="tokens"
-    )
+    user = models.ForeignKey(UserMe, on_delete=models.CASCADE, related_name="tokens")
+    queue = models.ForeignKey(Queue, on_delete=models.CASCADE, related_name="tokens")
 
 
     token_number = models.IntegerField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='WAITING')
+
+
+    # FIX #1: Track swaps per-token (per-queue entry) instead of globally on User
+    swaps_used = models.IntegerField(default=0)
 
 
     joined_at = models.DateTimeField(auto_now_add=True)
@@ -124,6 +131,7 @@ class Token(models.Model):
     def is_call_expired(self):
         if not self.called_at:
             return False
+        # 60 second window for the "Confirmation Call"
         expiry_time = self.called_at + timezone.timedelta(seconds=60)
         return timezone.now() > expiry_time
 
@@ -136,4 +144,31 @@ class Token(models.Model):
         ordering = ['token_number']
 
 
+
+
+# =====================================================
+# 5️⃣ SWAP REQUEST (The Core of your USP)
+# =====================================================
+
+
+class SwapRequest(models.Model):
+    STATUS_CHOICES = (
+        ('PENDING', 'Pending'),
+        ('ACCEPTED', 'Accepted'),
+        ('REJECTED', 'Rejected'),
+    )
+
+
+    queue = models.ForeignKey(Queue, on_delete=models.CASCADE, related_name="swap_requests")
+   
+    # related_name allows sender.sent_requests.all()
+    sender = models.ForeignKey(Token, on_delete=models.CASCADE, related_name="sent_requests")
+    receiver = models.ForeignKey(Token, on_delete=models.CASCADE, related_name="received_requests")
+   
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+    def __str__(self):
+        return f"Swap [{self.status}]: {self.sender.token_number} <-> {self.receiver.token_number}"
 

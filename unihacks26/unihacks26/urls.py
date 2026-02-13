@@ -1,6 +1,7 @@
 """
 URL configuration for unihacks26 project.
 
+
 The `urlpatterns` list routes URLs to views. For more information please see:
     https://docs.djangoproject.com/en/5.2/topics/http/urls/
 Examples:
@@ -16,7 +17,48 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path
+from rnr import views
+
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    
+    path('api/user/signup/', views.user_signup_api, name='user_signup'),
+    path('api/user/login/', views.user_login_api, name='user_login'),
+   
+    
+    path('api/institution/signup/', views.institution_signup_api, name='inst_signup'),
+    path('api/institution/login/', views.institution_login_api, name='inst_login'),
+
+
+    path('api/institutions/', views.search_institutions, name='search_institutions'),
+   
+   
+    path('api/institution/dashboard/<int:inst_id>/', views.get_institution_dashboard, name='inst_dashboard'),
+
+
+    path('api/book-token/', views.book_token_api, name='book_token'),
+   
+   
+    path('api/token/confirm/<int:token_id>/', views.confirm_token_api, name='confirm_token'),
+   
+    
+    path('api/token/snooze/<int:token_id>/', views.snooze_api, name='snooze_token'),
+
+
+    
+    path('api/swap/request/', views.request_swap_api, name='request_swap'),
+   
+    
+    path('api/swap/accept/<int:swap_id>/', views.accept_swap_api, name='accept_swap'),
+
+
+   
+    path('api/queue/call-next/<int:queue_id>/', views.call_next_token, name='call_next'),
+    path('api/queue/create/', views.create_queue_api, name='create_queue'),
+
+
 ]
+
+
+
