@@ -11,26 +11,25 @@ import {
     Zap,
     History,
     MapPin,
-    ArrowRightLeft
+    ArrowRightLeft,
+    ExternalLink
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { useQueue } from '../context/QueueContext';
 
 const UserDashboard = () => {
-    // Mock data for the dashboard
+    const { queueData } = useQueue();
+
+    // Mock data for static parts
     const userData = {
         name: "Rownok",
-        activeToken: {
-            number: 49,
-            place: "Global Trust Bank",
-            peopleAhead: 7,
-            waitTime: "35 mins",
-            progress: 85
-        },
+        activeToken: queueData.activeToken,
         stats: [
             { label: "Total Visits", value: "24", icon: History, color: "text-blue-500", bg: "bg-blue-500/10" },
         ],
         swaps: {
-            used: 2,
-            total: 5
+            used: queueData.swapsUsed,
+            total: queueData.swapsTotal
         },
         history: [
             { id: 1, place: "City General Hospital", date: "20 Aug 2024", token: "#105", status: "Completed" },
@@ -140,22 +139,32 @@ const UserDashboard = () => {
                                 <ArrowRightLeft size={32} />
                             </div>
                             <h3 className="text-3xl font-black mb-4 tracking-tight">Daily Swaps</h3>
-                            <p className="text-theme-text-muted text-lg font-medium leading-relaxed mb-8">
-                                You have <span className="text-primary font-black">{userData.swaps.total - userData.swaps.used} swaps</span> remaining for today.
-                            </p>
+                            <div className="mb-8">
+                                {userData.swaps.used >= userData.swaps.total ? (
+                                    <p className="text-rose-500 text-lg font-black uppercase tracking-tight flex items-center gap-2">
+                                        <Zap size={20} /> No more swaps left today.
+                                    </p>
+                                ) : (
+                                    <p className="text-theme-text-muted text-lg font-medium leading-relaxed">
+                                        You have <span className="text-primary font-black">{userData.swaps.total - userData.swaps.used} swaps</span> remaining for today.
+                                    </p>
+                                )}
+                            </div>
 
                             {/* Visual Progress for Swaps */}
                             <div className="space-y-4">
                                 <div className="flex justify-between items-end">
                                     <span className="text-xs font-black text-theme-text-muted uppercase tracking-widest">Usage Limit</span>
-                                    <span className="text-xl font-black">{userData.swaps.used} / {userData.swaps.total}</span>
+                                    <span className={`text-xl font-black ${userData.swaps.used >= userData.swaps.total ? 'text-rose-500' : ''}`}>
+                                        {userData.swaps.used} / {userData.swaps.total}
+                                    </span>
                                 </div>
                                 <div className="h-4 bg-theme-bg rounded-full overflow-hidden p-1 border border-theme-border shadow-inner flex gap-1">
                                     {[...Array(userData.swaps.total)].map((_, i) => (
                                         <div
                                             key={i}
                                             className={`flex-1 rounded-full transition-all duration-500 ${i < userData.swaps.used
-                                                ? 'bg-primary shadow-[0_0_10px_rgba(59,130,246,0.5)]'
+                                                ? (userData.swaps.used >= userData.swaps.total ? 'bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.5)]' : 'bg-primary shadow-[0_0_10px_rgba(59,130,246,0.5)]')
                                                 : 'bg-theme-border'
                                                 }`}
                                         />
@@ -163,9 +172,15 @@ const UserDashboard = () => {
                                 </div>
                             </div>
                         </div>
-                        <button className="w-full mt-10 py-5 bg-primary text-white hover:bg-indigo-600 rounded-[2rem] font-black text-base flex items-center justify-center gap-3 transition-all shadow-lg shadow-primary/25">
-                            Request New Swap
-                        </button>
+                        <Link
+                            to="/queue-status"
+                            className={`w-full mt-10 py-5 rounded-[2rem] font-black text-base flex items-center justify-center gap-3 transition-all shadow-lg ${userData.swaps.used >= userData.swaps.total
+                                    ? 'bg-theme-bg border-2 border-theme-border text-theme-text-muted cursor-not-allowed opacity-70'
+                                    : 'bg-primary text-white hover:bg-indigo-600 shadow-primary/25'
+                                }`}
+                        >
+                            {userData.swaps.used >= userData.swaps.total ? 'Limit Reached' : 'Manage Active Queue'} <ExternalLink size={20} />
+                        </Link>
                     </motion.div>
 
                     {/* Stats Grid Icons */}
@@ -217,11 +232,34 @@ const UserDashboard = () => {
                     >
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-10 gap-4">
                             <h3 className="text-3xl font-black flex items-center gap-3">
-                                <History size={30} className="text-primary" /> Activity History
+                                <History size={30} className="text-primary" /> Activity & Swaps
                             </h3>
-                            <button className="text-base font-black text-primary hover:underline underline-offset-8">Download Report</button>
+                            <button className="text-base font-black text-primary hover:underline underline-offset-8">View All</button>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                            {/* Live Swap History */}
+                            {queueData.swapHistory.map((swap) => (
+                                <motion.div
+                                    key={swap.id}
+                                    whileHover={{ y: -5 }}
+                                    className="bg-primary/5 border-2 border-primary/20 rounded-[2.5rem] p-8 flex flex-col justify-between hover:border-primary/40 transition-all cursor-pointer group shadow-sm"
+                                >
+                                    <div className="flex items-center justify-between mb-8">
+                                        <div className="w-16 h-16 bg-primary/10 border-2 border-primary/20 rounded-3xl flex items-center justify-center font-black text-2xl text-primary shadow-inner">
+                                            #{swap.to}
+                                        </div>
+                                        <div className="text-xs font-black px-5 py-2 rounded-full bg-primary/20 text-primary">
+                                            {swap.type.toUpperCase()}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <p className="text-2xl font-black mb-1">Swap successful</p>
+                                        <p className="text-sm text-theme-text-muted font-bold flex items-center gap-2">
+                                            <ArrowRightLeft size={14} /> Swapped from #{swap.from}
+                                        </p>
+                                    </div>
+                                </motion.div>
+                            ))}
                             {userData.history.map((item) => (
                                 <motion.div
                                     key={item.id}
