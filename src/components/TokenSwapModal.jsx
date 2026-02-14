@@ -1,25 +1,14 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ArrowRightLeft, User, Clock, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { useQueue } from '../context/QueueContext';
+import { manageTokenPosition } from '../services/api';
 
-const TokenSwapModal = ({ isOpen, onClose, myToken }) => {
-    const { performSwap } = useQueue();
+const TokenSwapModal = ({ isOpen, onClose, myToken, tokenId, onSuccess, availableAhead = [], availableBehind = [] }) => {
     const [mode, setMode] = useState('jump'); // 'jump' or 'back'
     const [selectedUsers, setSelectedUsers] = useState([]);
     const [reason, setReason] = useState('');
     const [isSent, setIsSent] = useState(false);
-
-    const availableAhead = [
-        { id: 1, token: 45, position: 2, waitTime: "10 mins" },
-        { id: 2, token: 46, position: 3, waitTime: "15 mins" },
-        { id: 3, token: 47, position: 4, waitTime: "20 mins" },
-    ];
-
-    const availableBehind = [
-        { id: 4, token: 55, position: 6, waitTime: "45 mins" },
-        { id: 5, token: 60, position: 11, waitTime: "70 mins" },
-    ];
+    const [loading, setLoading] = useState(false);
 
     const reasons = [
         "Emergency / Medical",
@@ -29,31 +18,31 @@ const TokenSwapModal = ({ isOpen, onClose, myToken }) => {
     ];
 
     const toggleUser = (user) => {
-        if (selectedUsers.find(u => u.id === user.id)) {
-            setSelectedUsers(prev => prev.filter(u => u.id !== user.id));
-        } else {
-            setSelectedUsers(prev => [...prev, user]);
-        }
+        // Multi-select or single select? Let's do single for swaps.
+        setSelectedUsers([user]);
     };
 
-    const handleSendRequest = () => {
-        setIsSent(true);
+    const handleSendRequest = async () => {
+        if (!tokenId || selectedUsers.length === 0) return;
 
-        // Simulate a successful swap for demonstration
-        if (selectedUsers.length > 0) {
-            const targetToken = selectedUsers[0].token;
-            const targetPos = selectedUsers[0].position;
+        setLoading(true);
+        try {
+            const targetTokenId = selectedUsers[0].id;
+            await manageTokenPosition(tokenId, 'SWAP', { target_token_id: targetTokenId, reason });
+            setIsSent(true);
+
             setTimeout(() => {
-                performSwap(targetToken, targetPos);
-            }, 1000);
+                onSuccess?.();
+                onClose();
+                setIsSent(false);
+                setSelectedUsers([]);
+                setReason('');
+                setLoading(false);
+            }, 2000);
+        } catch (err) {
+            alert(err.message);
+            setLoading(false);
         }
-
-        setTimeout(() => {
-            onClose();
-            setIsSent(false);
-            setSelectedUsers([]);
-            setReason('');
-        }, 3000);
     };
 
     return (
@@ -146,7 +135,7 @@ const TokenSwapModal = ({ isOpen, onClose, myToken }) => {
                                                             #{user.token}
                                                         </div>
                                                         <div className="text-left">
-                                                            <p className="text-xl font-black">Spot #{user.token}</p>
+                                                            <p className="text-xl font-black">{user.user_name || `Spot #${user.token}`}</p>
                                                             <p className="text-sm font-bold flex items-center gap-2 text-theme-text-muted"><Clock size={16} className="text-primary" /> {user.waitTime} wait </p>
                                                         </div>
                                                     </div>
@@ -157,6 +146,11 @@ const TokenSwapModal = ({ isOpen, onClose, myToken }) => {
                                                     </div>
                                                 </motion.button>
                                             ))}
+                                            {(mode === 'jump' ? availableAhead : availableBehind).length === 0 && (
+                                                <div className="p-10 text-center bg-theme-bg border-2 border-theme-border border-dashed rounded-[2rem]">
+                                                    <p className="text-theme-text-muted font-bold tracking-tight">No other users available in this direction.</p>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
 

@@ -1,71 +1,86 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Map as MapIcon, Filter, Info, Users, Clock, Navigation, CheckCircle2 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Search, Map as MapIcon, Info, Users, Clock, Navigation, CheckCircle2, Loader2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { fetchInstitutions, bookToken } from '../services/api';
 
 const DiscoveryPage = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedPlace, setSelectedPlace] = useState(null);
+    const [places, setPlaces] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [booking, setBooking] = useState(false);
+    const [selectedQueueId, setSelectedQueueId] = useState(null);
+    const navigate = useNavigate();
 
-    const places = [
-        {
-            id: 1,
-            name: "Global Trust Bank - Downtown",
-            type: "Bank",
-            crowd: "Low",
-            crowdValue: 3,
-            currentServing: 42,
-            lastToken: 45,
-            eta: "5 mins",
-            lat: "20%",
-            lng: "30%",
-            color: "bg-emerald-500"
-        },
-        {
-            id: 2,
-            name: "City General Hospital",
-            type: "Hospital",
-            crowd: "High",
-            crowdValue: 18,
-            currentServing: 105,
-            lastToken: 123,
-            eta: "45 mins",
-            lat: "45%",
-            lng: "60%",
-            color: "bg-rose-500"
-        },
-        {
-            id: 3,
-            name: "Student Admin - Block A",
-            type: "College",
-            crowd: "Medium",
-            crowdValue: 12,
-            currentServing: 15,
-            lastToken: 27,
-            eta: "20 mins",
-            lat: "70%",
-            lng: "40%",
-            color: "bg-amber-500"
-        },
-        {
-            id: 4,
-            name: "Starbucks - Tech Park",
-            type: "Cafe",
-            crowd: "Low",
-            crowdValue: 2,
-            currentServing: 88,
-            lastToken: 90,
-            eta: "2 mins",
-            lat: "15%",
-            lng: "75%",
-            color: "bg-emerald-500"
+    const authData = JSON.parse(localStorage.getItem('auth_data') || '{}');
+    const userId = authData.user_id;
+
+    const loadInstitutions = async (query = '') => {
+        setLoading(true);
+        try {
+            const data = await fetchInstitutions(query);
+            // Map backend data to frontend format
+            const mapped = data.map(inst => {
+                const activeQueues = inst.queues?.filter(q => !q.is_closed) || [];
+                const firstQueue = activeQueues[0] || inst.queues?.[0] || null;
+                const isOffline = activeQueues.length === 0;
+
+                return {
+                    id: inst.id,
+                    queues: inst.queues || [],
+                    name: inst.name,
+                    type: inst.address?.split(',')[0] || "Institution",
+                    crowd: isOffline ? "Offline" : "Online",
+                    currentServing: firstQueue ? (firstQueue.service_time_minutes || 5) : "---", // For sidebar summary
+                    eta: firstQueue ? `${(firstQueue.service_time_minutes || 5) * (firstQueue.active_tokens || 2)} mins` : "Closed",
+                    color: isOffline ? "bg-theme-border" : "bg-primary",
+                    lat: `${20 + (inst.id * 10) % 60}%`,
+                    lng: `${30 + (inst.id * 15) % 60}%`,
+                    isOffline
+                };
+            });
+            setPlaces(mapped);
+        } catch (err) {
+            setError('Failed to load places');
+            console.error(err);
+        } finally {
+            setLoading(false);
         }
-    ];
+    };
 
-    const filteredPlaces = places.filter(p =>
-        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        p.type.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            loadInstitutions(searchQuery);
+        }, 500);
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
+
+    useEffect(() => {
+        setSelectedQueueId(null);
+    }, [selectedPlace]);
+
+    const handleJoinQueue = async () => {
+        if (!selectedPlace || !selectedQueueId) {
+            alert("Please select a queue first.");
+            return;
+        }
+        if (!userId) {
+            navigate('/login');
+            return;
+        }
+
+        setBooking(true);
+        try {
+            await bookToken(userId, selectedQueueId);
+            navigate('/dashboard');
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            setBooking(false);
+        }
+    };
 
     return (
         <div className="pt-16 h-screen flex flex-col md:flex-row overflow-hidden bg-theme-bg transition-colors duration-500">
@@ -88,7 +103,12 @@ const DiscoveryPage = () => {
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-6 space-y-5 custom-scrollbar">
-                    {filteredPlaces.length > 0 ? filteredPlaces.map(place => (
+                    {loading ? (
+                        <div className="flex flex-col items-center justify-center py-20 gap-4">
+                            <Loader2 className="animate-spin text-primary" size={48} />
+                            <p className="text-theme-text-muted font-bold">Finding institutions...</p>
+                        </div>
+                    ) : places.length > 0 ? places.map(place => (
                         <motion.button
                             key={place.id}
                             whileHover={{ scale: 1.02, x: 5 }}
@@ -131,12 +151,8 @@ const DiscoveryPage = () => {
                     }}
                 />
 
-                {/* Decorative Map Elements */}
-                <div className="absolute top-1/4 left-1/3 w-64 h-64 bg-primary/10 rounded-full blur-[100px] pointer-events-none" />
-                <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none" />
-
                 {/* Pins */}
-                {filteredPlaces.map(place => (
+                {!loading && places.map(place => (
                     <motion.button
                         key={place.id}
                         initial={{ scale: 0, opacity: 0 }}
@@ -150,7 +166,6 @@ const DiscoveryPage = () => {
                             <MapIcon size={20} className="text-white" />
                             <div className="absolute -inset-2 bg-current opacity-20 rounded-full animate-ping pointer-events-none" />
                         </div>
-                        {/* Tooltip on hover */}
                         <div className="absolute bottom-full mb-4 left-1/2 -translate-x-1/2 bg-theme-surface border-2 border-theme-border px-5 py-2 rounded-2xl text-sm font-black text-theme-text opacity-0 group-hover:opacity-100 transition-all scale-75 group-hover:scale-100 whitespace-nowrap pointer-events-none shadow-2xl">
                             {place.name}
                         </div>
@@ -170,7 +185,7 @@ const DiscoveryPage = () => {
                                 <div>
                                     <h2 className="text-3xl font-black mb-2 tracking-tight">{selectedPlace.name}</h2>
                                     <p className="text-theme-text-muted text-lg font-medium flex items-center gap-2">
-                                        <Navigation size={20} className="text-primary" /> Technopark District
+                                        <Navigation size={20} className="text-primary" /> District Area
                                     </p>
                                 </div>
                                 <button
@@ -181,37 +196,51 @@ const DiscoveryPage = () => {
                                 </button>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-6 mb-10">
-                                <div className="bg-theme-bg p-6 rounded-[2rem] border-2 border-theme-border shadow-inner group hover:border-primary/20 transition-all">
-                                    <p className="text-xs font-black text-theme-text-muted uppercase tracking-widest mb-2">Live Progress</p>
-                                    <p className="text-4xl font-black">#{selectedPlace.currentServing}</p>
-                                </div>
-                                <div className="bg-theme-bg p-6 rounded-[2rem] border-2 border-theme-border shadow-inner group hover:border-primary/20 transition-all">
-                                    <p className="text-xs font-black text-theme-text-muted uppercase tracking-widest mb-2">EST. WAIT</p>
-                                    <p className="text-4xl font-black text-primary">{selectedPlace.eta}</p>
-                                </div>
-                            </div>
-
-                            <div className="space-y-6">
-                                <div className="flex items-center justify-between text-lg">
-                                    <span className="text-theme-text-muted font-black">People currently in line</span>
-                                    <span className="font-black text-2xl">{selectedPlace.crowdValue}</span>
-                                </div>
-                                <div className="w-full bg-theme-bg h-5 rounded-full overflow-hidden p-1 border-2 border-theme-border shadow-inner">
-                                    <motion.div
-                                        initial={{ width: 0 }}
-                                        animate={{ width: `${(selectedPlace.crowdValue / 20) * 100}%` }}
-                                        className={`h-full rounded-full ${selectedPlace.color.replace('bg-', 'bg-')} shadow-[0_0_15px_rgba(0,0,0,0.1)]`}
-                                    />
+                            <div className="space-y-6 mb-10">
+                                <p className="text-sm font-black text-theme-text-muted uppercase tracking-widest ml-4">Select Counter/Service</p>
+                                <div className="grid grid-cols-1 gap-4">
+                                    {selectedPlace.queues.map(q => (
+                                        <button
+                                            key={q.id}
+                                            onClick={() => !q.is_closed && setSelectedQueueId(q.id)}
+                                            disabled={q.is_closed}
+                                            className={`p-6 rounded-[2rem] border-2 text-left transition-all flex justify-between items-center ${q.is_closed ? 'opacity-40 grayscale border-theme-border cursor-not-allowed' :
+                                                    selectedQueueId === q.id ? 'bg-primary/5 border-primary ring-2 ring-primary/10' :
+                                                        'bg-theme-bg border-theme-border hover:border-primary/30'
+                                                }`}
+                                        >
+                                            <div>
+                                                <p className={`font-black text-lg ${selectedQueueId === q.id ? 'text-primary' : ''}`}>{q.name}</p>
+                                                <p className="text-xs text-theme-text-muted font-bold uppercase tracking-widest">
+                                                    {q.is_closed ? 'Closed' : `${q.active_tokens || 0} waiting • ${q.service_time_minutes}m avg`}
+                                                </p>
+                                            </div>
+                                            {selectedQueueId === q.id && <CheckCircle2 className="text-primary" size={24} />}
+                                        </button>
+                                    ))}
+                                    {selectedPlace.queues.length === 0 && (
+                                        <div className="p-8 text-center bg-theme-bg border-2 border-theme-border border-dashed rounded-[2rem]">
+                                            <p className="text-theme-text-muted font-bold tracking-tight">No active counters at this time.</p>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
                             <motion.button
-                                whileHover={{ scale: 1.05, y: -2 }}
-                                whileTap={{ scale: 0.95 }}
-                                className="w-full mt-10 py-6 bg-primary hover:bg-indigo-600 text-white rounded-[2.5rem] font-black text-xl flex items-center justify-center gap-3 shadow-2xl shadow-primary/30 group"
+                                whileHover={!(booking || selectedPlace.isOffline) ? { scale: 1.05, y: -2 } : {}}
+                                whileTap={!(booking || selectedPlace.isOffline) ? { scale: 0.95 } : {}}
+                                onClick={() => handleJoinQueue(selectedPlace)}
+                                disabled={booking || selectedPlace.isOffline}
+                                className={`w-full mt-10 py-6 text-white rounded-[2.5rem] font-black text-xl flex items-center justify-center gap-3 shadow-2xl transition-all ${(booking || selectedPlace.isOffline)
+                                    ? 'bg-theme-border cursor-not-allowed shadow-none'
+                                    : 'bg-primary hover:bg-indigo-600 shadow-primary/30 group'
+                                    }`}
                             >
-                                <CheckCircle2 size={28} /> Join Virtual Queue
+                                {booking ? <Loader2 className="animate-spin" size={28} /> : (
+                                    <>
+                                        <CheckCircle2 size={28} /> {selectedPlace.isOffline ? "Currently Offline" : (!selectedQueueId ? "Select a Service" : "Join Virtual Queue")}
+                                    </>
+                                )}
                             </motion.button>
                         </motion.div>
                     )}

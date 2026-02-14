@@ -15,15 +15,16 @@ import {
 } from 'lucide-react';
 
 const UserProfile = () => {
+    const authData = JSON.parse(localStorage.getItem('auth_data') || '{}');
     const [isSeniorPriority, setIsSeniorPriority] = useState(false);
 
     const profileSections = [
         {
             title: "Account Details",
             items: [
-                { label: "Display Name", value: "Rownok Mahbub", icon: User },
-                { label: "Support Email", value: "rownok.m@example.com", icon: Mail },
-                { label: "Emergency Phone", value: "+880 1712-345678", icon: Phone },
+                { label: "Display Name", value: authData.name || "Guest", icon: User },
+                { label: "Support Email", value: authData.email || "No email linked", icon: Mail },
+                { label: "Emergency Phone", value: authData.phone || "+880 1XXX-XXXXXX", icon: Phone },
             ]
         }
     ];
@@ -47,14 +48,14 @@ const UserProfile = () => {
                         >
                             <div className="relative inline-block mb-8">
                                 <div className="w-40 h-40 rounded-[3rem] bg-gradient-to-br from-primary to-indigo-600 flex items-center justify-center text-6xl font-black text-white shadow-2xl shadow-primary/25 group">
-                                    RM
+                                    {(authData.name || "U").substring(0, 2).toUpperCase()}
                                 </div>
                                 <button className="absolute -bottom-2 -right-2 p-4 bg-primary text-white rounded-2xl shadow-xl border-4 border-theme-surface hover:scale-110 transition-transform active:scale-90">
                                     <Camera size={24} />
                                 </button>
                             </div>
-                            <h2 className="text-3xl font-black mb-1">Rownok Mahbub</h2>
-                            <p className="text-theme-text-muted text-base font-bold tracking-wide">Elite Member since 2024</p>
+                            <h2 className="text-3xl font-black mb-1">{authData.name || "User"}</h2>
+                            <p className="text-theme-text-muted text-base font-bold tracking-wide">Member</p>
 
                             <div className="mt-10 pt-10 border-t-2 border-theme-border space-y-6">
                                 <div className="flex items-center justify-between text-base">
@@ -63,7 +64,7 @@ const UserProfile = () => {
                                 </div>
                                 <div className="flex items-center justify-between text-base">
                                     <span className="text-theme-text-muted font-bold flex items-center gap-3"><Award size={20} className="text-primary" /> Total Tokens</span>
-                                    <span className="font-black">156 Used</span>
+                                    <span className="font-black">Used recently</span>
                                 </div>
                             </div>
                         </motion.div>
@@ -92,7 +93,9 @@ const UserProfile = () => {
                                     <p className="text-theme-text-muted text-sm font-black uppercase tracking-widest">Instant Swap Deposits</p>
                                 </div>
                             </div>
-                            <p className="text-primary font-black text-4xl tracking-tighter">$1,240.50</p>
+                            <p className="text-primary font-black text-4xl tracking-tighter">
+                                ${new Intl.NumberFormat().format(authData.reward_points || 0)}
+                            </p>
                         </motion.div>
 
                         {/* Sections */}

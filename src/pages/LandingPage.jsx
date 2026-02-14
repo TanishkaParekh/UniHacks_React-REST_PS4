@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 
 const Hero = () => {
     return (
-        <div className="relative pt-32 pb-20 lg:pt-48 lg:pb-32 overflow-hidden bg-theme-bg">
+        <div className="relative pt-22 pb-10 lg:pt-28 lg:pb-28 overflow-hidden bg-theme-bg">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -17,10 +17,10 @@ const Hero = () => {
                         Smart Virtual Queue System
                     </span>
                     <h1 className="text-6xl lg:text-8xl font-black tracking-tight mb-8 leading-tight text-transparent bg-clip-text bg-gradient-to-r from-primary via-indigo-500 to-indigo-600 dark:from-primary dark:to-indigo-400">
-                        Wait less, <br />
+                        Wait less,
                         do more.
                     </h1>
-                    <p className="max-w-3xl mx-auto text-xl text-theme-text-muted mb-12 font-medium leading-relaxed">
+                    <p className="max-w-3xl mx-auto text-xl text-theme-text-muted mb-8 font-medium leading-relaxed">
                         Say goodbye to physical lines. Join queues remotely, track your position live, and swap tokens instantly—all from your phone.
                     </p>
                     <div className="flex flex-col sm:flex-row items-center justify-center gap-6 font-black">
@@ -93,9 +93,9 @@ const Features = () => {
     ];
 
     return (
-        <section className="py-32 bg-theme-bg">
+        <section className="py-8 bg-theme-bg">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="text-center mb-20">
+                <div className="text-center mb-10">
                     <h2 className="text-4xl lg:text-5xl font-black mb-6 tracking-tight">Revolutionizing the Wait</h2>
                     <p className="text-theme-text-muted text-xl max-w-2xl mx-auto font-medium">A powerful virtual suite designed for mobility, transparency, and fairness in service delivery.</p>
                 </div>
@@ -114,7 +114,7 @@ const LandingPage = () => {
         <div className="min-h-screen bg-theme-bg overflow-x-hidden transition-colors duration-500">
             <Hero />
             <Features />
-            <footer className="py-16 border-t-2 border-theme-border text-center">
+            <footer className="py-10 border-t-2 border-theme-border text-center">
                 <p className="text-theme-text-muted text-base font-bold underline-offset-4 decoration-primary decoration-4">
                     &copy; 2026 Q-FLOW SMART SYSTEMS. THE FUTURE OF SERVICE.
                 </p>
