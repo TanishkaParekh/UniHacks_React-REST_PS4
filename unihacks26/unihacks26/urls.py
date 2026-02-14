@@ -22,43 +22,53 @@ from rnr import views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    
+    # User Authentication
+    # 🔑 AUTHENTICATION
+    # =====================================================
+    # 🔑 AUTHENTICATION
+    # =====================================================
     path('api/user/signup/', views.user_signup_api, name='user_signup'),
     path('api/user/login/', views.user_login_api, name='user_login'),
    
-    
     path('api/institution/signup/', views.institution_signup_api, name='inst_signup'),
     path('api/institution/login/', views.institution_login_api, name='inst_login'),
 
 
+    # =====================================================
+    # 🔍 DISCOVERY & DASHBOARD
+    # =====================================================
     path('api/institutions/', views.search_institutions, name='search_institutions'),
-   
-   
     path('api/institution/dashboard/<int:inst_id>/', views.get_institution_dashboard, name='inst_dashboard'),
 
 
+    # =====================================================
+    # 🎫 QUEUE & TOKEN OPERATIONS
+    # =====================================================
+    # NEW: Create a queue
+    path('api/queue/create/', views.create_queue_api, name='create_queue'),
+    # Join a queue
     path('api/book-token/', views.book_token_api, name='book_token'),
    
+    # Institution calls next token
+    path('api/queue/call-next/<int:queue_id>/', views.call_next_token, name='call_next'),
    
+    # User confirms arrival or gets moved to back
     path('api/token/confirm/<int:token_id>/', views.confirm_token_api, name='confirm_token'),
-   
-    
     path('api/token/snooze/<int:token_id>/', views.snooze_api, name='snooze_token'),
 
 
-    
-    path('api/swap/request/', views.request_swap_api, name='request_swap'),
+    # =====================================================
+    # 🚀 SMART POSITION MANAGEMENT
+    # =====================================================
+    # The consolidated function for CANCEL, MOVE_FORWARD, MOVE_BACK
+    path('api/token/manage/', views.manage_token_position_api, name='token_manage'),
    
-    
+    # Accept a pending swap request
     path('api/swap/accept/<int:swap_id>/', views.accept_swap_api, name='accept_swap'),
 
 
-   
-    path('api/queue/call-next/<int:queue_id>/', views.call_next_token, name='call_next'),
-    path('api/queue/create/', views.create_queue_api, name='create_queue'),
 
 
 ]
-
 
 

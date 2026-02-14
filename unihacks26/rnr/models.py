@@ -7,9 +7,7 @@ from django.utils import timezone
 
 
 
-# =====================================================
-# 1️⃣ USER MODEL (Normal User)
-# =====================================================
+# USER MODEL (Normal User)
 
 
 class UserMe(models.Model):
@@ -32,9 +30,7 @@ class UserMe(models.Model):
 
 
 
-# =====================================================
-# 2️⃣ INSTITUTION (Admin Model)
-# =====================================================
+#  INSTITUTION (Admin Model)
 
 
 class Institution(models.Model):
@@ -58,9 +54,7 @@ class Institution(models.Model):
 
 
 
-# =====================================================
-# 3️⃣ QUEUE
-# =====================================================
+# QUEUE
 
 
 class Queue(models.Model):
@@ -99,9 +93,7 @@ class Queue(models.Model):
 
 
 
-# =====================================================
-# 4️⃣ TOKEN (Updated with Per-Queue Swap Tracking)
-# =====================================================
+# TOKEN (Updated with Per-Queue Swap Tracking)
 
 
 class Token(models.Model):
@@ -120,7 +112,6 @@ class Token(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='WAITING')
 
 
-    # FIX #1: Track swaps per-token (per-queue entry) instead of globally on User
     swaps_used = models.IntegerField(default=0)
 
 
@@ -146,28 +137,50 @@ class Token(models.Model):
 
 
 
-# =====================================================
-# 5️⃣ SWAP REQUEST (The Core of your USP)
-# =====================================================
+# SWAP REQUEST (The Core of your USP)
 
+from django.db import models
+from django.utils import timezone
+from datetime import timedelta
 
 class SwapRequest(models.Model):
+
     STATUS_CHOICES = (
         ('PENDING', 'Pending'),
         ('ACCEPTED', 'Accepted'),
         ('REJECTED', 'Rejected'),
     )
 
+    queue = models.ForeignKey(
+        Queue,
+        on_delete=models.CASCADE,
+        related_name="swap_requests"
+    )
 
-    queue = models.ForeignKey(Queue, on_delete=models.CASCADE, related_name="swap_requests")
-   
-    # related_name allows sender.sent_requests.all()
-    sender = models.ForeignKey(Token, on_delete=models.CASCADE, related_name="sent_requests")
-    receiver = models.ForeignKey(Token, on_delete=models.CASCADE, related_name="received_requests")
-   
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    sender = models.ForeignKey(
+        Token,
+        on_delete=models.CASCADE,
+        related_name="sent_requests"
+    )
+
+    receiver = models.ForeignKey(
+        Token,
+        on_delete=models.CASCADE,
+        related_name="received_requests"
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='PENDING'
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
+    
+    def is_expired(self):
+        expiry_time = self.created_at + timedelta(minutes=5)
+        return timezone.now() > expiry_time
 
     def __str__(self):
         return f"Swap [{self.status}]: {self.sender.token_number} <-> {self.receiver.token_number}"

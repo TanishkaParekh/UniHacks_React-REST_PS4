@@ -1,8 +1,8 @@
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
-
+from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth.hashers import make_password, check_password
 from django.shortcuts import get_object_or_404
 from django.db import transaction, models
@@ -157,47 +157,148 @@ def book_token_api(request):
 
 
 # =====================================================
-# SMART TOKEN SWAP LOGIC (USP)
+# CONSOLIDATED SMART POSITION LOGIC
 # =====================================================
 
 
 @api_view(['POST'])
-def request_swap_api(request):
-    sender_token = get_object_or_404(Token, id=request.data.get('token_id'))
-    queue = sender_token.queue
-   
-    # 1. Checks: 20% limit, Credits, and Multi-request prevention
-    total_waiting = Token.objects.filter(queue=queue, status="WAITING").count()
-    active_swaps = SwapRequest.objects.filter(queue=queue, status="PENDING").count()
-    limit = max(1, int(0.2 * total_waiting))
+def manage_token_position_api(request):
+    token_id = request.data.get('token_id')
+    action = request.data.get('action') # CANCEL, MOVE_FORWARD, MOVE_BACK
 
 
-    if active_swaps >= limit:
-        return Response({"error": "Swap system busy."}, status=400)
-    if sender_token.swaps_used >= queue.max_swaps_per_user:
-        return Response({"error": "No swap credits left."}, status=400)
-    if SwapRequest.objects.filter(sender=sender_token, status="PENDING").exists():
-        return Response({"error": "Pending request already exists."}, status=400)
+    with transaction.atomic():
+        token = get_object_or_404(Token.objects.select_for_update(), id=token_id)
+        queue = token.queue
+        current_pos = token.token_number
 
 
-    # 2. Find target & Range Check
-    target_num = request.data.get('target_token_number')
-    receiver_token = Token.objects.filter(queue=queue, token_number=target_num, status="WAITING").first()
+        if token.status != "WAITING" or token.called_at is not None:
+            return Response({"error": "Token cannot be modified."}, status=400)
 
 
-    if not receiver_token or (sender_token.token_number - receiver_token.token_number) > 3 or receiver_token.token_number >= sender_token.token_number:
-        return Response({"error": "Target out of range or invalid."}, status=400)
+        # -----------------------------------------------------
+        # CANCEL: Re-index + FCFS Logic
+        # -----------------------------------------------------
+        if action == "CANCEL":
+            token.status = 'SKIPPED'
+            token.save()
+            shift_queue_positions(queue)
+           
+            if current_pos == 1:
+                return Response({
+                    "message": "First slot is empty! FCFS claim window open.",
+                    "slot_status": "OPEN_FOR_CLAIM"
+                }, status=200)
+            return Response({"message": "Token cancelled and queue shifted."}, status=200)
 
 
-    SwapRequest.objects.create(sender=sender_token, receiver=receiver_token, queue=queue)
-    return Response({"message": "Swap request sent!"})
+
+
+        # MOVE FORWARD: Tiered Range (1-10, 11-20, etc.)
+        elif action == "MOVE_FORWARD":
+            # Active Expiration Cleanup (Auto-terminate old requests)
+            expired_requests = SwapRequest.objects.filter(queue=queue, status="PENDING")
+            for req in expired_requests:
+                if req.is_expired():
+                    req.status = "REJECTED"
+                    req.save()
+
+
+            try:
+                # Expecting tiered range from Frontend (e.g., 1-10)
+                range_start = int(request.data.get("range_start"))
+                range_end = int(request.data.get("range_end"))
+            except:
+                return Response({"error": "Invalid range format."}, status=400)
+
+
+            # Validate the 10-token interval
+            if (range_end - range_start) >= 10:
+                return Response({"error": "Interval cannot exceed 10 spots."}, status=400)
+           
+            if range_end >= current_pos:
+                return Response({"error": "Target range must be ahead of your current position."}, status=400)
+
+
+            total_waiting = Token.objects.filter(queue=queue, status="WAITING").count()
+            active_swaps = SwapRequest.objects.filter(queue=queue, status="PENDING").count()
+            limit = max(1, int(0.2 * total_waiting))
+
+
+            if active_swaps >= limit:
+                return Response({"error": "Swap system at 20% capacity."}, status=400)
+
+
+            if token.swaps_used >= queue.max_swaps_per_user:
+                return Response({"error": "Swap limit reached."}, status=400)
+
+
+            # Find the best target (closest to front) in the chosen tier
+            receiver = Token.objects.filter(
+                queue=queue, status="WAITING",
+                token_number__gte=range_start, token_number__lte=range_end
+            ).order_by('token_number').first()
+
+
+            if not receiver:
+                return Response({"error": f"No active tokens in range {range_start}-{range_end}."}, status=400)
+
+
+            SwapRequest.objects.create(sender=token, receiver=receiver, queue=queue)
+            return Response({"message": f"Swap request sent to #{receiver.token_number} in tier {range_start}-{range_end}."})
+
+
+        # -----------------------------------------------------
+        # MOVE BACK: Target Position + Intermediate Shift
+        # -----------------------------------------------------
+        elif action == "MOVE_BACK":
+            try:
+                target_pos = int(request.data.get("target_position"))
+            except:
+                return Response({"error": "Invalid position format."}, status=400)
+
+
+            if target_pos <= current_pos:
+                return Response({"error": "Target must be behind current position."}, status=400)
+
+
+            last_token = Token.objects.filter(queue=queue, status="WAITING").order_by('-token_number').first()
+            actual_target = min(target_pos, last_token.token_number if last_token else current_pos)
+
+
+            tokens_to_shift = Token.objects.filter(
+                queue=queue, status="WAITING",
+                token_number__gt=current_pos, token_number__lte=actual_target
+            ).select_for_update()
+
+
+            for t in tokens_to_shift:
+                t.token_number -= 1
+                t.save()
+
+
+            token.token_number = actual_target
+            token.save()
+            return Response({"message": f"Moved back to position {actual_target}."})
+
+
+    return Response({"error": "Invalid action."}, status=400)
+
+
 
 
 @api_view(['POST'])
 def accept_swap_api(request, swap_id):
     with transaction.atomic():
-        swap = get_object_or_404(SwapRequest, id=swap_id, status="PENDING")
+        swap = get_object_or_404(SwapRequest.objects.select_for_update(), id=swap_id, status="PENDING")
         s, r = swap.sender, swap.receiver
+
+
+        if swap.is_expired():
+            swap.status = "REJECTED"
+            swap.save()
+            return Response({"error": "Swap request expired."}, status=400)
 
 
         if s.status != "WAITING" or r.status != "WAITING":
@@ -308,8 +409,6 @@ def snooze_api(request, token_id):
     return Response({"message": "Snoozed to back."})
 
 
-
-
 @api_view(['POST'])
 def create_queue_api(request):
     """
@@ -318,15 +417,12 @@ def create_queue_api(request):
     """
     data = request.data
     inst_id = data.get('institution_id')
-    
-    # Verify institution exists
     institution = get_object_or_404(Institution, id=inst_id)
     
-    # Create the queue
     queue = Queue.objects.create(
         institution=institution,
         name=data.get('name'),
-        size=data.get('size', 100), # Default size if not provided
+        size=data.get('size', 100),
         service_time_minutes=data.get('service_time', 5),
         allow_swaps=data.get('allow_swaps', True)
     )
@@ -336,4 +432,3 @@ def create_queue_api(request):
         "queue_id": queue.id,
         "name": queue.name
     }, status=status.HTTP_201_CREATED)
-
