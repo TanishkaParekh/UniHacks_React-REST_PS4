@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Map as MapIcon, Info, Users, Clock, Navigation, CheckCircle2, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { fetchInstitutions, bookToken } from '../services/api';
+import { fetchInstitutions, bookToken, getDiscoveryMap } from '../services/api';
 
 const DiscoveryPage = () => {
     const [searchQuery, setSearchQuery] = useState('');
@@ -17,31 +17,119 @@ const DiscoveryPage = () => {
     const authData = JSON.parse(localStorage.getItem('auth_data') || '{}');
     const userId = authData.user_id;
 
+    const [userLocation, setUserLocation] = useState(null);
+
+    useEffect(() => {
+        let mounted = true;
+
+        // Force fallback if location takes too long (e.g. user ignores prompt)
+        const timeoutId = setTimeout(() => {
+            if (mounted && !userLocation) {
+                console.log("Location timed out, using default");
+                setUserLocation({ lat: 19.0760, lon: 72.8777 });
+            }
+        }, 5000);
+
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    if (mounted) {
+                        setUserLocation({
+                            lat: position.coords.latitude,
+                            lon: position.coords.longitude
+                        });
+                    }
+                },
+                (error) => {
+                    console.error("Error getting location:", error);
+                    if (mounted) {
+                        setUserLocation({ lat: 19.0760, lon: 72.8777 });
+                    }
+                },
+                { timeout: 4000 }
+            );
+        } else {
+            if (mounted) setUserLocation({ lat: 19.0760, lon: 72.8777 });
+        }
+
+        return () => {
+            mounted = false;
+            clearTimeout(timeoutId);
+        };
+    }, []);
+
     const loadInstitutions = async (query = '') => {
         setLoading(true);
         try {
-            const data = await fetchInstitutions(query);
+            // Use discovery map API if location is available, else fallback to basic search
+            let data = [];
+            if (userLocation) {
+                data = await getDiscoveryMap(userLocation.lat, userLocation.lon);
+            } else {
+                data = await fetchInstitutions(query);
+            }
+
             // Map backend data to frontend format
             const mapped = data.map(inst => {
-                const activeQueues = inst.queues?.filter(q => !q.is_closed) || [];
-                const firstQueue = activeQueues[0] || inst.queues?.[0] || null;
+                // If fetching from discovery map, data structure might be slightly different
+                // API sends: { id, name, lat, lng, crowd, color, distance }
+                // We need to map this to our UI format
+
+                // For demonstration on the "mock map" grid, we normalize coordinates relative to user
+                // In a real app, you'd use a library like Leaflet or Google Maps.
+                // Here we simulate placement based on lat/lng differences for visual effect.
+
+                let relLat = 50;
+                let relLng = 50;
+
+                if (userLocation && inst.lat && inst.lng) {
+                    // Simple mock projection: 1 degree difference approx 100% screen width (very rough)
+                    // This is just to scatter them around the center (50, 50)
+                    relLat = 50 - (inst.lat - userLocation.lat) * 1000;
+                    relLng = 50 + (inst.lng - userLocation.lon) * 1000;
+
+                    // Clamp to screen
+                    relLat = Math.max(10, Math.min(90, relLat));
+                    relLng = Math.max(10, Math.min(90, relLng));
+                } else {
+                    // Fallback random placement if no coords
+                    relLat = 20 + (inst.id * 10) % 60;
+                    relLng = 30 + (inst.id * 15) % 60;
+                }
+
+                // If handling search results from fetchInstitutions (different shape)
+                const queues = inst.queues || [];
+                const activeQueues = queues.filter(q => !q.is_closed);
+                const firstQueue = activeQueues[0] || queues[0] || null;
                 const isOffline = activeQueues.length === 0;
 
                 return {
                     id: inst.id,
-                    queues: inst.queues || [],
+                    queues: inst.queues || [], // Make sure backend sends queues in discovery endpoint if needed, or fetch details on select
                     name: inst.name,
-                    type: inst.address?.split(',')[0] || "Institution",
-                    crowd: isOffline ? "Offline" : "Online",
-                    currentServing: firstQueue ? (firstQueue.service_time_minutes || 5) : "---", // For sidebar summary
-                    eta: firstQueue ? `${(firstQueue.service_time_minutes || 5) * (firstQueue.active_tokens || 2)} mins` : "Closed",
-                    color: isOffline ? "bg-theme-border" : "bg-primary",
-                    lat: `${20 + (inst.id * 10) % 60}%`,
-                    lng: `${30 + (inst.id * 15) % 60}%`,
-                    isOffline
+                    type: "Institution", // category not yet in API
+                    crowd: inst.crowd || (isOffline ? "Offline" : "Online"),
+
+                    // Logic for eta/serving might need detail fetch if not in list
+                    // For now, use basic defaults or data if available
+                    currentServing: "---",
+                    eta: inst.distance ? `${inst.distance} km` : (firstQueue ? "Open" : "Closed"),
+
+                    color: inst.color || (isOffline ? "bg-theme-border" : "bg-primary"),
+                    lat: `${relLat}%`,
+                    lng: `${relLng}%`,
+                    isOffline: inst.crowd === 'Offline'
                 };
             });
-            setPlaces(mapped);
+
+            // Filter locally by search query if using discovery API which might return all nearby
+            if (query) {
+                const lowerQ = query.toLowerCase();
+                setPlaces(mapped.filter(p => p.name.toLowerCase().includes(lowerQ)));
+            } else {
+                setPlaces(mapped);
+            }
+
         } catch (err) {
             setError('Failed to load places');
             console.error(err);
@@ -51,11 +139,12 @@ const DiscoveryPage = () => {
     };
 
     useEffect(() => {
+        if (!userLocation) return; // Wait for location
         const timer = setTimeout(() => {
             loadInstitutions(searchQuery);
         }, 500);
         return () => clearTimeout(timer);
-    }, [searchQuery]);
+    }, [searchQuery, userLocation]);
 
     useEffect(() => {
         setSelectedQueueId(null);
@@ -205,8 +294,8 @@ const DiscoveryPage = () => {
                                             onClick={() => !q.is_closed && setSelectedQueueId(q.id)}
                                             disabled={q.is_closed}
                                             className={`p-6 rounded-[2rem] border-2 text-left transition-all flex justify-between items-center ${q.is_closed ? 'opacity-40 grayscale border-theme-border cursor-not-allowed' :
-                                                    selectedQueueId === q.id ? 'bg-primary/5 border-primary ring-2 ring-primary/10' :
-                                                        'bg-theme-bg border-theme-border hover:border-primary/30'
+                                                selectedQueueId === q.id ? 'bg-primary/5 border-primary ring-2 ring-primary/10' :
+                                                    'bg-theme-bg border-theme-border hover:border-primary/30'
                                                 }`}
                                         >
                                             <div>

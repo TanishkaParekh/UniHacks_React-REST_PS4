@@ -52,6 +52,13 @@ export const fetchInstitutions = async (query = '') => {
     return response.json();
 };
 
+export const getDiscoveryMap = async (lat, lon) => {
+    const query = new URLSearchParams({ lat, lon }).toString();
+    const response = await fetch(`${API_BASE_URL}/discovery/?${query}`);
+    if (!response.ok) throw new Error('Failed to fetch discovery map');
+    return response.json();
+};
+
 export const getUserDashboard = async (userId) => {
     const response = await fetch(`${API_BASE_URL}/user/dashboard/${userId}/`);
     if (!response.ok) throw new Error('Failed to fetch user dashboard');
