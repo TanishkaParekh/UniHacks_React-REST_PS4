@@ -38,6 +38,7 @@ urlpatterns = [
     # 🔍 DISCOVERY & DASHBOARD
     # =====================================================
     path('api/institutions/', views.search_institutions, name='search_institutions'),
+    path('api/user/dashboard/<int:user_id>/', views.get_user_dashboard, name='user_dashboard'),
     path('api/institution/dashboard/<int:inst_id>/', views.get_institution_dashboard, name='inst_dashboard'),
 
 
@@ -65,8 +66,11 @@ urlpatterns = [
    
     # Accept a pending swap request
     path('api/swap/accept/<int:swap_id>/', views.accept_swap_api, name='accept_swap'),
+    
+    # Reject a pending swap request
+    path('api/swap/reject/<int:swap_id>/', views.reject_swap_api, name='reject_swap'),
 
-
+    path('discovery/', views.discovery_map_api, name='discovery_map'),
 
 
 ]

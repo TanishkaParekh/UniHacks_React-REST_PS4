@@ -59,6 +59,8 @@ def user_login_api(request):
             "message": "Login successful",
             "user_id": user.id,
             "name": user.name,
+            "email": user.email,
+            "reward_points": user.reward_points,
             "role": "user"
         }, status=status.HTTP_200_OK)
 
@@ -195,7 +197,7 @@ def manage_token_position_api(request):
 
 
 
-        # MOVE FORWARD: Tiered Range (1-10, 11-20, etc.)
+        # MOVE FORWARD: Tiered Range (Legacy)
         elif action == "MOVE_FORWARD":
             # Active Expiration Cleanup (Auto-terminate old requests)
             expired_requests = SwapRequest.objects.filter(queue=queue, status="PENDING")
@@ -204,14 +206,12 @@ def manage_token_position_api(request):
                     req.status = "REJECTED"
                     req.save()
 
-
             try:
                 # Expecting tiered range from Frontend (e.g., 1-10)
                 range_start = int(request.data.get("range_start"))
                 range_end = int(request.data.get("range_end"))
             except:
                 return Response({"error": "Invalid range format."}, status=400)
-
 
             # Validate the 10-token interval
             if (range_end - range_start) >= 10:
@@ -220,19 +220,15 @@ def manage_token_position_api(request):
             if range_end >= current_pos:
                 return Response({"error": "Target range must be ahead of your current position."}, status=400)
 
-
             total_waiting = Token.objects.filter(queue=queue, status="WAITING").count()
             active_swaps = SwapRequest.objects.filter(queue=queue, status="PENDING").count()
             limit = max(1, int(0.2 * total_waiting))
 
-
             if active_swaps >= limit:
                 return Response({"error": "Swap system at 20% capacity."}, status=400)
 
-
             if token.swaps_used >= queue.max_swaps_per_user:
                 return Response({"error": "Swap limit reached."}, status=400)
-
 
             # Find the best target (closest to front) in the chosen tier
             receiver = Token.objects.filter(
@@ -240,13 +236,31 @@ def manage_token_position_api(request):
                 token_number__gte=range_start, token_number__lte=range_end
             ).order_by('token_number').first()
 
-
             if not receiver:
                 return Response({"error": f"No active tokens in range {range_start}-{range_end}."}, status=400)
 
+            SwapRequest.objects.create(sender=token, receiver=receiver, queue=queue)
+            return Response({"message": f"Swap request sent to #{receiver.token_number}."})
+
+        # SWAP: Direct Target Selection (New)
+        elif action == "SWAP":
+            target_token_id = request.data.get('target_token_id')
+            if not target_token_id:
+                return Response({"error": "Target token ID is required."}, status=400)
+            
+            receiver = get_object_or_404(Token, id=target_token_id)
+            
+            if receiver.queue != queue:
+                return Response({"error": "Target must be in the same queue."}, status=400)
+            
+            if receiver.status != "WAITING":
+                return Response({"error": "Target token is no longer waiting."}, status=400)
+                
+            if token.swaps_used >= queue.max_swaps_per_user:
+                return Response({"error": "Swap limit reached."}, status=400)
 
             SwapRequest.objects.create(sender=token, receiver=receiver, queue=queue)
-            return Response({"message": f"Swap request sent to #{receiver.token_number} in tier {range_start}-{range_end}."})
+            return Response({"message": f"Swap request sent to {receiver.user.name}."})
 
 
         # -----------------------------------------------------
@@ -289,6 +303,16 @@ def manage_token_position_api(request):
 
 
 @api_view(['POST'])
+def reject_swap_api(request, swap_id):
+    swap = get_object_or_404(SwapRequest, id=swap_id)
+    if swap.status == 'PENDING':
+        swap.status = 'REJECTED'
+        swap.save()
+        return Response({"message": "Swap request rejected."})
+    return Response({"error": "Swap request not pending."}, status=400)
+
+
+@api_view(['POST'])
 def accept_swap_api(request, swap_id):
     with transaction.atomic():
         swap = get_object_or_404(SwapRequest.objects.select_for_update(), id=swap_id, status="PENDING")
@@ -310,9 +334,14 @@ def accept_swap_api(request, swap_id):
         # Exchange Numbers
         s.token_number, r.token_number = r.token_number, s.token_number
         s.swaps_used += 1
+        
+        # Credit Transfer: Sender pays 10, Receiver gains 5 (Platform keeps 5 or adjust as needed)
+        # For simplicity, let's do Sender -10, Receiver +5 as requested for "plus minus effectively"
+        s.user.reward_points = max(0, s.user.reward_points - 10)
         r.user.reward_points += 5
        
         s.save()
+        s.user.save()
         r.save()
         r.user.save()
         swap.status = "ACCEPTED"
@@ -336,13 +365,16 @@ def get_institution_dashboard(request, inst_id):
     queues = Queue.objects.filter(institution=institution)
     data = []
     for q in queues:
-        waiting_tokens = Token.objects.filter(queue=q, status='WAITING').order_by('token_number')
+        all_active_tokens = Token.objects.filter(queue=q, status__in=['WAITING', 'CALLING']).order_by('token_number')
         data.append({
-            "queue_id": q.id,
+            "id": q.id,
             "queue_name": q.name,
-            "total_waiting": waiting_tokens.count(),
-            "current_serving": waiting_tokens.first().token_number if waiting_tokens.exists() else "None",
-            "lineup": TokenSerializer(waiting_tokens, many=True).data
+            "size": q.size,
+            "service_time_minutes": q.service_time_minutes,
+            "is_paused": q.is_paused,
+            "is_closed": q.is_closed,
+            "active_tokens": all_active_tokens.count(),
+            "tokens": TokenSerializer(all_active_tokens, many=True).data
         })
     return Response(data)
 
@@ -366,6 +398,7 @@ def call_next_token(request, queue_id):
 
 
     next_token.called_at = timezone.now()
+    next_token.status = 'CALLING'
     next_token.save()
 
 
@@ -432,3 +465,97 @@ def create_queue_api(request):
         "queue_id": queue.id,
         "name": queue.name
     }, status=status.HTTP_201_CREATED)
+@api_view(['GET'])
+def get_user_dashboard(request, user_id):
+    user = get_object_or_404(UserMe, id=user_id)
+    tokens = Token.objects.filter(user=user, status='WAITING').order_by('joined_at')
+    
+    data = []
+    for t in tokens:
+        queue = t.queue
+        # Get current serving for this queue
+        current_serving_token = Token.objects.filter(queue=queue, status='WAITING').order_by('token_number').first()
+        current_num = current_serving_token.token_number if current_serving_token else 0
+        
+        # Get users ahead and behind for swapping
+        ahead = Token.objects.filter(queue=queue, status='WAITING', token_number__lt=t.token_number).order_by('-token_number')
+        behind = Token.objects.filter(queue=queue, status='WAITING', token_number__gt=t.token_number).order_by('token_number')
+        
+        data.append({
+            "token_id": t.id,
+            "token_number": t.token_number,
+            "queue_name": queue.name,
+            "institution_name": queue.institution.name,
+            "current_serving": current_num,
+            "current_serving": current_num,
+            "position": max(0, t.token_number - current_num),
+            "incoming_swaps": [{
+                "swap_id": req.id,
+                "sender_name": req.sender.user.name,
+                "sender_token": req.sender.token_number,
+                "sender_position": max(0, req.sender.token_number - current_num)
+            } for req in SwapRequest.objects.filter(receiver=t, status='PENDING')],
+            "status": t.status,
+            "swaps_used": t.swaps_used,
+            "max_swaps": queue.max_swaps_per_user,
+            "reward_points": user.reward_points,
+            "swappable_ahead": [{
+                "id": tk.id, 
+                "token": tk.token_number, 
+                "position": t.token_number - tk.token_number,
+                "user_name": tk.user.name,
+                "waitTime": f"{(t.token_number - tk.token_number) * queue.service_time_minutes} mins"
+            } for tk in ahead[:5]],
+            "swappable_behind": [{
+                "id": tk.id, 
+                "token": tk.token_number, 
+                "position": tk.token_number - t.token_number,
+                "user_name": tk.user.name,
+                "waitTime": f"{(tk.token_number - t.token_number) * queue.service_time_minutes} mins"
+            } for tk in behind[:5]]
+        })
+    return Response(data)
+
+    from .utils import calculate_distance, get_crowd_status
+
+@api_view(['GET'])
+def discovery_map_api(request):
+    user_lat = request.query_params.get('lat')
+    user_lon = request.query_params.get('lon')
+    
+    institutions = Institution.objects.all()
+    results = []
+
+    for inst in institutions:
+        # Get active tokens for this institution
+        # Tokens are related to Queue, not Institution directly
+        queues = inst.queues.all()
+        count = sum(q.tokens.filter(status='WAITING').count() for q in queues)
+        crowd_data = get_crowd_status(count)
+        
+        # Calculate distance if user location is provided
+        dist = calculate_distance(user_lat, user_lon, inst.latitude, inst.longitude)
+        
+        # Get queues data
+        queues_data = []
+        for q in queues:
+            queues_data.append({
+                "id": q.id,
+                "name": q.name,
+                "is_closed": q.is_closed,
+                "service_time_minutes": q.service_time_minutes,
+                "active_tokens": q.tokens.filter(status='WAITING').count()
+            })
+
+        results.append({
+            "id": inst.id,
+            "name": inst.name,
+            "lat": float(inst.latitude) if inst.latitude else None,
+            "lng": float(inst.longitude) if inst.longitude else None,
+            "crowd": crowd_data['status'],
+            "color": crowd_data['color'],
+            "distance": round(dist, 2) if dist else None,
+            "queues": queues_data
+        })
+
+    return Response(results)
